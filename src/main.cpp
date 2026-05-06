@@ -3,45 +3,191 @@
 
 #define RXD2 16
 #define TXD2 17
-int count = 0;
+
+#define SENSOR_ID 1
+#define MODBUS_BAUDRATE 9600
+
+#define READ_INTERVAL_MS 2000
+#define MODBUS_RETRY 3
+#define BETWEEN_REQUEST_DELAY_MS 120
+
 ModbusMaster node;
+
+struct SoilData {
+  float moisture;
+  float temperature;
+  uint16_t ec;
+  float ph;
+  uint16_t nitrogen;
+  uint16_t phosphorus;
+  uint16_t potassium;
+  uint16_t salinity;
+  bool salinityValid;
+  bool valid;
+};
+
+SoilData soil = {0, 0, 0, 0, 0, 0, 0, 0, false, false};
+
+void clearSerial2Buffer() {
+  while (Serial2.available()) {
+    Serial2.read();
+  }
+}
+
+bool modbusReadHolding(uint16_t startAddress, uint16_t quantity) {
+  for (uint8_t attempt = 1; attempt <= MODBUS_RETRY; attempt++) {
+    clearSerial2Buffer();
+
+    uint8_t result = node.readHoldingRegisters(startAddress, quantity);
+
+    if (result == node.ku8MBSuccess) {
+      return true;
+    }
+
+    Serial.print("Modbus read failed. Address: 0x");
+    Serial.print(startAddress, HEX);
+    Serial.print(" Quantity: ");
+    Serial.print(quantity);
+    Serial.print(" Attempt: ");
+    Serial.print(attempt);
+    Serial.print("/");
+    Serial.print(MODBUS_RETRY);
+    Serial.print(" Error: ");
+    Serial.println(result);
+
+    delay(BETWEEN_REQUEST_DELAY_MS);
+  }
+
+  return false;
+}
+
+bool readMainSoilRegisters(SoilData &data) {
+  bool ok = modbusReadHolding(0x0000, 7);
+
+  if (!ok) {
+    data.valid = false;
+    return false;
+  }
+
+  uint16_t moisture_raw = node.getResponseBuffer(0);
+  int16_t temp_raw      = (int16_t)node.getResponseBuffer(1);
+  uint16_t ec_raw       = node.getResponseBuffer(2);
+  uint16_t ph_raw       = node.getResponseBuffer(3);
+  uint16_t n_raw        = node.getResponseBuffer(4);
+  uint16_t p_raw        = node.getResponseBuffer(5);
+  uint16_t k_raw        = node.getResponseBuffer(6);
+
+  data.moisture = moisture_raw / 10.0;
+  data.temperature = temp_raw;
+  data.ec = ec_raw;
+  data.ph = ph_raw / 100.0;
+  data.nitrogen = n_raw;
+  data.phosphorus = p_raw;
+  data.potassium = k_raw;
+  data.valid = true;
+  return true;
+}
+
+bool readSalinity(SoilData &data) {
+  delay(BETWEEN_REQUEST_DELAY_MS);
+
+  bool ok = modbusReadHolding(0x0007, 1);
+
+  if (!ok) {
+    data.salinityValid = false;
+    return false;
+  }
+
+  data.salinity = node.getResponseBuffer(0);
+  data.salinityValid = true;
+  return true;
+}
+
+bool readSoilSensor(SoilData &data) {
+  data.valid = false;
+  data.salinityValid = false;
+
+  bool mainOk = readMainSoilRegisters(data);
+
+  if (!mainOk) {
+    return false;
+  }
+
+  readSalinity(data);
+
+  return true;
+}
+
+void printSoilData(const SoilData &data) {
+  Serial.println("===== SOIL DATA =====");
+
+  if (!data.valid) {
+    Serial.println("Sensor read failed");
+    Serial.println("---------------------");
+    return;
+  }
+
+  Serial.print("Moisture: ");
+  Serial.print(data.moisture, 1);
+  Serial.println(" %");
+
+  Serial.print("Temperature: ");
+  Serial.print(data.temperature, 1);
+  Serial.println(" C");
+
+  Serial.print("EC: ");
+  Serial.print(data.ec);
+  Serial.println(" uS/cm");
+
+  Serial.print("pH: ");
+  Serial.println(data.ph, 2);
+
+  Serial.print("N: ");
+  Serial.print(data.nitrogen);
+  Serial.println(" mg/kg");
+
+  Serial.print("P: ");
+  Serial.print(data.phosphorus);
+  Serial.println(" mg/kg");
+
+  Serial.print("K: ");
+  Serial.print(data.potassium);
+  Serial.println(" mg/kg");
+
+  if (data.salinityValid) {
+    Serial.print("Salinity: ");
+    Serial.println(data.salinity);
+  } else {
+    Serial.println("Salinity: read failed");
+  }
+
+  Serial.println("---------------------");
+}
 
 void setup() {
   Serial.begin(115200);
+  delay(1000);
 
-  Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
+  Serial2.setRxBufferSize(256);
+  Serial2.begin(MODBUS_BAUDRATE, SERIAL_8N1, RXD2, TXD2);
 
-  // Địa chỉ cảm biến Modbus, thường là 1
-  node.begin(1, Serial2);
+  node.begin(SENSOR_ID, Serial2);
 
-  Serial.println("ESP32 RS485 Modbus test start");
-  
+  Serial.println("ESP32 Soil Sensor Start - Auto RS485 Module");
 }
 
 void loop() {
-  // Đọc 7 thanh ghi từ địa chỉ 0x0000
-  uint8_t result = node.readHoldingRegisters(0x0000, 7);
+  static uint32_t lastReadTime = 0;
 
-  if (result == node.ku8MBSuccess) {
-    Serial.println("Read success:");
+  if (millis() - lastReadTime >= READ_INTERVAL_MS) {
+    lastReadTime = millis();
 
-    for (int i = 0; i < 7; i++) {
-      uint16_t value = node.getResponseBuffer(i);
+    bool ok = readSoilSensor(soil);
 
-      Serial.print("Register ");
-      Serial.print(i);
-      Serial.print(": ");
-      Serial.println(value);
+    if (!ok) {
+      soil.valid = false;
     }
-  } else {
-    Serial.print("Read failed. Error code: ");
-    Serial.println(result);
-  }
 
-  Serial.println("------------------");
-  
-  count += 1;
-  Serial.print("Count:");
-  Serial.println(count);
-  delay(1000);
+    printSoilData(soil);
+  }
 }
