@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ModbusMaster.h>
+#include "SinkBT.h"
 
 #define RXD2 16
 #define TXD2 17
@@ -12,6 +13,7 @@
 #define BETWEEN_REQUEST_DELAY_MS 120
 
 ModbusMaster node;
+SinkBT BT;
 
 struct SoilData {
   float moisture;
@@ -21,12 +23,10 @@ struct SoilData {
   uint16_t nitrogen;
   uint16_t phosphorus;
   uint16_t potassium;
-  uint16_t salinity;
-  bool salinityValid;
   bool valid;
 };
 
-SoilData soil = {0, 0, 0, 0, 0, 0, 0, 0, false, false};
+SoilData soil = {0, 0, 0, 0, 0, 0, 0, false};
 
 void clearSerial2Buffer() {
   while (Serial2.available()) {
@@ -78,42 +78,25 @@ bool readMainSoilRegisters(SoilData &data) {
   uint16_t k_raw        = node.getResponseBuffer(6);
 
   data.moisture = moisture_raw / 10.0;
-  data.temperature = temp_raw;
+  data.temperature = temp_raw / 10.0;
   data.ec = ec_raw;
   data.ph = ph_raw / 100.0;
   data.nitrogen = n_raw;
   data.phosphorus = p_raw;
   data.potassium = k_raw;
   data.valid = true;
-  return true;
-}
 
-bool readSalinity(SoilData &data) {
-  delay(BETWEEN_REQUEST_DELAY_MS);
-
-  bool ok = modbusReadHolding(0x0007, 1);
-
-  if (!ok) {
-    data.salinityValid = false;
-    return false;
-  }
-
-  data.salinity = node.getResponseBuffer(0);
-  data.salinityValid = true;
   return true;
 }
 
 bool readSoilSensor(SoilData &data) {
   data.valid = false;
-  data.salinityValid = false;
 
   bool mainOk = readMainSoilRegisters(data);
 
   if (!mainOk) {
     return false;
   }
-
-  readSalinity(data);
 
   return true;
 }
@@ -154,13 +137,6 @@ void printSoilData(const SoilData &data) {
   Serial.print(data.potassium);
   Serial.println(" mg/kg");
 
-  if (data.salinityValid) {
-    Serial.print("Salinity: ");
-    Serial.println(data.salinity);
-  } else {
-    Serial.println("Salinity: read failed");
-  }
-
   Serial.println("---------------------");
 }
 
@@ -174,10 +150,14 @@ void setup() {
   node.begin(SENSOR_ID, Serial2);
 
   Serial.println("ESP32 Soil Sensor Start - Auto RS485 Module");
+
+  BT.begin("ESP32_SOIL_SENSOR");
 }
 
 void loop() {
   static uint32_t lastReadTime = 0;
+
+  BT.CheckConnection();
 
   if (millis() - lastReadTime >= READ_INTERVAL_MS) {
     lastReadTime = millis();
@@ -189,5 +169,21 @@ void loop() {
     }
 
     printSoilData(soil);
+
+    if (BT.hasClient()) {
+      if (soil.valid) {
+        BT.SendSoilJson(
+          soil.moisture,
+          soil.temperature,
+          soil.ec,
+          soil.ph,
+          soil.nitrogen,
+          soil.phosphorus,
+          soil.potassium
+        );
+      } else {
+        BT.SendErrorJson("sensor_read_failed");
+      }
+    }
   }
 }
