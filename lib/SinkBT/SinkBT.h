@@ -6,7 +6,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#include <math.h>
+
 
 class SinkBT;
 
@@ -38,7 +38,8 @@ public:
     float ph,
     uint16_t nitrogen,
     uint16_t phosphorus,
-    uint16_t potassium
+    uint16_t potassium,
+    uint16_t percent_pin
   );
 
   void SendErrorJson(String message);

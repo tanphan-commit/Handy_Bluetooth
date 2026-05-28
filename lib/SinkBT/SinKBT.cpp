@@ -2,7 +2,7 @@
 
 #define SERVICE_UUID        "12345678-1234-1234-1234-1234567890ab"
 #define CHARACTERISTIC_UUID "abcd1234-1234-1234-1234-abcdef123456"
-
+//testgit
 SinkBTServerCallbacks::SinkBTServerCallbacks(SinkBT *owner) {
   _owner = owner;
 }
@@ -80,7 +80,8 @@ void SinkBT::SendSoilJson(
   float ph,
   uint16_t nitrogen,
   uint16_t phosphorus,
-  uint16_t potassium
+  uint16_t potassium,
+  uint16_t percent_pin
 ) {
   if (!_connected || _characteristic == nullptr) {
     return;
@@ -94,7 +95,8 @@ void SinkBT::SendSoilJson(
   json += "\"ph\":" + String(ph, 2) + ",";
   json += "\"n\":" + String(nitrogen) + ",";
   json += "\"p\":" + String(phosphorus) + ",";
-  json += "\"k\":" + String(potassium);
+  json += "\"k\":" + String(potassium) + ",";
+  json += "\"battery\":" + String(percent_pin);
   json += "}";
 
   _characteristic->setValue(json.c_str());
