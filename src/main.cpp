@@ -115,18 +115,18 @@ void clearSerial2Buffer()
 
 bool modbusReadHolding(uint16_t startAddress, uint16_t quantity)
 {
-  for (uint8_t attempt = 1; attempt <= MODBUS_RETRY; attempt++)
-  {
+  // for (uint8_t attempt = 1; attempt <= MODBUS_RETRY; attempt++)
+  // {
     clearSerial2Buffer();
     uint8_t result = node.readHoldingRegisters(startAddress, quantity);
 
     if (result == node.ku8MBSuccess)
       return true;
 
-    Serial.printf("Modbus read failed. Addr: 0x%X, Qty: %d, Attempt: %d/%d, Err: %d\n",
-                  startAddress, quantity, attempt, MODBUS_RETRY, result);
-    delay(BETWEEN_REQUEST_DELAY_MS);
-  }
+    Serial.printf("Modbus read failed. Addr: 0x%X, Qty: %d, Err: %d\n",
+                  startAddress, quantity, result);
+  //   delay(BETWEEN_REQUEST_DELAY_MS);
+  // }
   return false;
 }
 
@@ -223,18 +223,19 @@ void processSensorData()
   readSoilRegisters(soil);
   readBatteryPercent(soil);
 
-  triggerSuccessIndicators();
   printSoilData(soil);
 
   // Cập nhật màn hình
   if (soil.valid)
   {
+    triggerSuccessIndicators(); 
     dis.showdata(soil.moisture, soil.temperature, soil.ec, soil.ph,
                  soil.nitrogen, soil.phosphorus, soil.potassium, soil.percent_pin);
   }
   else
   {
     dis.error();
+    Serial.println("[DIS]Cảm biến lỗi!");
   }
 
   // Gửi Bluetooth
